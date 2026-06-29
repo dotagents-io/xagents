@@ -49,6 +49,14 @@ xagents --filenames=CLAUDE.md,GEMINI.md
 
 Syncs `AGENTS.md` files with multiple config files. Separate filenames with commas.
 
+### Skip Reference Check
+
+```bash
+xagents --nocheck
+```
+
+By default, xagents checks if a reference already exists before appending. This prevents duplicates but uses substring matching, which may have false positives (e.g., `@AGENTS.md.bak` is treated as containing `@AGENTS.md`). Use `--nocheck` to skip this check and always append the reference. This is useful for codebases where substring matching causes false positives.
+
 ## Integration
 
 ### npm Scripts

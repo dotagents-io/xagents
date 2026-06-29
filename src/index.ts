@@ -5,34 +5,30 @@ import { validateFilenames } from "./validator.js";
 
 const DEFAULT_FILENAMES = ["CLAUDE.md"];
 
-function parseArgs(): {
-  filenames: string[];
-  cwd: string;
-} {
-  const args = process.argv.slice(2);
-  let filenames = DEFAULT_FILENAMES;
-  let cwd = process.cwd();
-
-  for (const arg of args) {
-    if (arg.startsWith("--filenames=")) {
-      const value = arg.substring("--filenames=".length);
-      filenames = value
-        .split(",")
-        .map((f) => f.trim())
-        .filter((f) => f.length > 0);
-    }
-  }
-
-  return { filenames, cwd };
-}
-
 async function main(): Promise<void> {
   try {
-    const { filenames, cwd } = parseArgs();
+    let filenames = DEFAULT_FILENAMES;
+    let nocheck = false;
+
+    for (const arg of process.argv.slice(2)) {
+      if (arg.startsWith("--filenames=")) {
+        const value = arg.substring("--filenames=".length);
+        filenames = value
+          .split(",")
+          .map((f) => f.trim())
+          .filter((f) => f.length > 0);
+      } else if (arg === "--nocheck") {
+        nocheck = true;
+      }
+    }
 
     validateFilenames(filenames);
 
-    const result = await syncAgentsWithConfigFiles(cwd, filenames);
+    const result = await syncAgentsWithConfigFiles(
+      process.cwd(),
+      filenames,
+      nocheck
+    );
 
     console.log(`Found ${result.agentsFound} AGENTS.md file(s)`);
 
@@ -54,8 +50,13 @@ async function main(): Promise<void> {
       console.log("No changes needed");
     }
 
+    if (result.warnings.length > 0) {
+      console.warn("\nWarnings:");
+      result.warnings.forEach((warn) => console.warn(`  - ${warn}`));
+    }
+
     if (result.errors.length > 0) {
-      console.error("\nErrors encountered:");
+      console.error("\nErrors:");
       result.errors.forEach((err) => console.error(`  - ${err}`));
       process.exit(1);
     }

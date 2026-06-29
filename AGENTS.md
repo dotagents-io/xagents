@@ -11,14 +11,59 @@ This file documents the technical constraints and design decisions for the `xage
 - Configuration files must contain the literal string `@AGENTS.md` somewhere within their content
 - If a configuration file is missing or does not contain the reference, create it or append the reference
 
-### Special Case: `.agents/AGENTS.md`
+### Special Case: `.agents/AGENTS.md` at Any Level
 
-When `AGENTS.md` is located at `.agents/AGENTS.md` (project root level):
+When `AGENTS.md` is located in a `.agents/` directory:
 
-- Do **not** create `.agents/CLAUDE.md` (or other config files)
-- Instead, append reference to root-level `CLAUDE.md` (e.g., `/CLAUDE.md`, not `/.agents/CLAUDE.md`)
-- This allows the `.agents/` directory to remain purely for spec storage
-- Root config files maintain awareness of all `.agents/` specifications
+- Do **not** create config files inside `.agents/`
+- Instead, create config files in the parent directory (the one containing `.agents/`)
+- Reference points to the `.agents/` path from that parent
+- This allows `.agents/` directories to remain purely for spec storage
+- Each parent config file maintains awareness of all its `.agents/` specifications
+
+**Examples:**
+
+**Example 1: Root `.agents/` only**
+```
+.agents/AGENTS.md
+.agents/context/AGENTS.md
+```
+→ Creates `CLAUDE.md` (root) with:
+```
+@.agents/AGENTS.md
+@.agents/context/AGENTS.md
+```
+
+**Example 2: Regular AGENTS.md + root `.agents/`**
+```
+AGENTS.md
+.agents/AGENTS.md
+```
+→ Creates `CLAUDE.md` (root) with:
+```
+@AGENTS.md
+@.agents/AGENTS.md
+```
+(Regular references added first, `.agents/` references added last)
+
+**Example 3: Nested `.agents/` at multiple levels**
+```
+AGENTS.md
+.agents/AGENTS.md
+repo1/.agents/AGENTS.md
+repo1/.agents/context/AGENTS.md
+```
+→ Creates:
+- `CLAUDE.md` (root):
+  ```
+  @AGENTS.md
+  @.agents/AGENTS.md
+  ```
+- `repo1/CLAUDE.md`:
+  ```
+  @.agents/AGENTS.md
+  @.agents/context/AGENTS.md
+  ```
 
 ## Design Constraints
 
@@ -62,6 +107,19 @@ Writing code is reviewed with extra care to prevent accidental data loss.
 - Placement: Appended as a new line if the file already exists
 - No special formatting or comments around the reference
 - Human-readable format that works in any text-based config
+
+### Reference Matching Philosophy
+
+xagents uses **substring matching** (case-insensitive) when checking if a reference already exists:
+
+**Design principle:** False positives are acceptable; false negatives are not.
+
+- **False positive example:** File contains `@AGENTS.md.bak` → treated as containing `@AGENTS.md` → reference not appended again
+- **Avoids false negatives:** File contains `_@AGENTS.md_` (Markdown italics) or `[@AGENTS.md]` (link) → correctly found, no duplicate
+
+This simple approach prevents duplicating references in various formatting contexts while accepting that some non-exact matches may prevent appending in edge cases.
+
+For codebases where substring matching causes issues, use the `--nocheck` flag to skip the reference check entirely (always appends).
 
 ## CLI Interface
 

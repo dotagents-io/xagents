@@ -1,5 +1,5 @@
 import { promises as fs } from "fs";
-import { dirname, join, relative } from "path";
+import { dirname, join, relative, resolve, sep } from "path";
 
 export interface SyncResult {
   agentsFound: number;
@@ -7,12 +7,14 @@ export interface SyncResult {
   filesUpdated: number;
   createdPaths: string[];
   updatedPaths: string[];
+  warnings: string[];
   errors: string[];
 }
 
 export async function syncAgentsWithConfigFiles(
   rootDir: string,
-  configFilenames: string[]
+  configFilenames: string[],
+  nocheck: boolean = false
 ): Promise<SyncResult> {
   const result: SyncResult = {
     agentsFound: 0,
@@ -20,56 +22,45 @@ export async function syncAgentsWithConfigFiles(
     filesUpdated: 0,
     createdPaths: [],
     updatedPaths: [],
+    warnings: [],
     errors: [],
   };
 
   try {
-    // Check for .agents/AGENTS.md (special case)
-    const agentsDirPath = join(rootDir, ".agents", "AGENTS.md");
-    const hasAgentsDirFile = await fileExists(agentsDirPath);
+    const { files: allAgentsMdFiles, errors: scanErrors } =
+      await getAllAgentsMdFiles(rootDir);
+    result.warnings.push(...scanErrors);
 
-    if (hasAgentsDirFile) {
-      result.agentsFound++;
-      for (const configFilename of configFilenames) {
-        const configPath = join(rootDir, configFilename);
-        try {
-          const { created, updated } = await ensureReference(
-            configPath,
-            "@.agents/AGENTS.md"
-          );
-          if (created) {
-            result.filesCreated++;
-            result.createdPaths.push(`./${configFilename}`);
-          }
-          if (updated) {
-            result.filesUpdated++;
-            result.updatedPaths.push(`./${configFilename}`);
-          }
-        } catch (err) {
-          result.errors.push(
-            `Failed to process ${configPath}: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
+    // Split into .agents/ paths and other paths
+    const agentsPathFiles: string[] = [];
+    const otherAgentsMdFiles: string[] = [];
+
+    for (const file of allAgentsMdFiles) {
+      const normalized = resolve(file);
+      if (
+        normalized.includes(sep + ".agents" + sep) ||
+        normalized.endsWith(sep + ".agents" + sep + "AGENTS.md")
+      ) {
+        agentsPathFiles.push(file);
+      } else {
+        otherAgentsMdFiles.push(file);
       }
     }
 
-    // Process all other AGENTS.md files (excluding .agents/AGENTS.md)
-    const otherAgentsMdFiles = await getAllAgentsMdFilesExcluding(
-      rootDir,
-      agentsDirPath
-    );
-    result.agentsFound += otherAgentsMdFiles.length;
+    result.agentsFound = allAgentsMdFiles.length;
 
+    // Process regular AGENTS.md files first
     for (const agentsPath of otherAgentsMdFiles) {
       const dirPath = dirname(agentsPath);
       for (const configFilename of configFilenames) {
         const configPath = join(dirPath, configFilename);
         try {
+          const relPath = `./${relative(rootDir, configPath)}`;
           const { created, updated } = await ensureReference(
             configPath,
-            "@AGENTS.md"
+            "@AGENTS.md",
+            nocheck
           );
-          const relPath = `./${relative(rootDir, configPath)}`;
           if (created) {
             result.filesCreated++;
             result.createdPaths.push(relPath);
@@ -85,6 +76,62 @@ export async function syncAgentsWithConfigFiles(
         }
       }
     }
+
+    // Process .agents/AGENTS.md files (last, so references stack in config files)
+    // Group by parent directory (the directory containing .agents/)
+    const agentsByParent: Map<string, string[]> = new Map();
+
+    for (const agentsPath of agentsPathFiles) {
+      const relPath = relative(rootDir, agentsPath);
+      const parts = relPath.split(sep);
+      let agentsIndex = -1;
+
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i] === ".agents") {
+          agentsIndex = i;
+          break;
+        }
+      }
+
+      if (agentsIndex === -1) continue;
+
+      const parentPath = join(rootDir, ...parts.slice(0, agentsIndex));
+      const referencePath = parts.slice(agentsIndex).join("/");
+
+      if (!agentsByParent.has(parentPath)) {
+        agentsByParent.set(parentPath, []);
+      }
+      agentsByParent.get(parentPath)!.push(referencePath);
+    }
+
+    // Write config files with .agents/ references
+    for (const [parentPath, references] of agentsByParent) {
+      for (const configFilename of configFilenames) {
+        const configPath = join(parentPath, configFilename);
+        for (const reference of references) {
+          try {
+            const relPath = `./${relative(rootDir, configPath)}`;
+            const { created, updated } = await ensureReference(
+              configPath,
+              `@${reference}`,
+              nocheck
+            );
+            if (created) {
+              result.filesCreated++;
+              result.createdPaths.push(relPath);
+            }
+            if (updated) {
+              result.filesUpdated++;
+              result.updatedPaths.push(relPath);
+            }
+          } catch (err) {
+            result.errors.push(
+              `Failed to process ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+      }
+    }
   } catch (err) {
     result.errors.push(
       `Failed to scan directory: ${err instanceof Error ? err.message : String(err)}`
@@ -96,11 +143,14 @@ export async function syncAgentsWithConfigFiles(
 
 async function ensureReference(
   filePath: string,
-  reference: string
+  reference: string,
+  nocheck: boolean = false
 ): Promise<{ created: boolean; updated: boolean }> {
-  const hasRef = await hasReference(filePath, reference);
-  if (hasRef) {
-    return { created: false, updated: false };
+  if (!nocheck) {
+    const hasRef = await hasReference(filePath, reference);
+    if (hasRef) {
+      return { created: false, updated: false };
+    }
   }
 
   const exists = await fileExists(filePath);
@@ -135,11 +185,11 @@ async function addReference(filePath: string, reference: string): Promise<void> 
   }
 }
 
-async function getAllAgentsMdFilesExcluding(
-  rootDir: string,
-  excludePath: string
-): Promise<string[]> {
+async function getAllAgentsMdFiles(
+  rootDir: string
+): Promise<{ files: string[]; errors: string[] }> {
   const results: string[] = [];
+  const errors: string[] = [];
 
   async function walk(dir: string): Promise<void> {
     try {
@@ -160,17 +210,19 @@ async function getAllAgentsMdFilesExcluding(
 
         if (entry.isDirectory()) {
           await walk(fullPath);
-        } else if (entry.name === "AGENTS.md" && fullPath !== excludePath) {
+        } else if (entry.name === "AGENTS.md") {
           results.push(fullPath);
         }
       }
     } catch (err) {
-      console.error(`Warning: could not read ${dir}`);
+      const msg =
+        err instanceof Error ? err.message : String(err);
+      errors.push(`Failed to read directory ${dir}: ${msg}`);
     }
   }
 
   await walk(rootDir);
-  return results.sort();
+  return { files: results.sort(), errors };
 }
 
 async function fileExists(path: string): Promise<boolean> {
