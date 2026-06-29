@@ -162,19 +162,19 @@ async function hasReference(
 }
 
 async function appendReference(filePath: string, reference: string): Promise<void> {
-  const fh = await fs.open(filePath, "r");
-  let prefix = "\n";
+  const fh = await fs.open(filePath, "a+");
   try {
     const { size } = await fh.stat();
+    let prefix = "\n";
     if (size > 0) {
       const buf = Buffer.alloc(1);
       await fh.read(buf, 0, 1, size - 1);
       if (buf[0] === 0x0a) prefix = "";
     }
+    await fh.appendFile(`${prefix}${reference}\n`);
   } finally {
     await fh.close();
   }
-  await fs.appendFile(filePath, `${prefix}${reference}\n`, "utf-8");
 }
 
 async function getAllAgentsMdFiles(
@@ -214,7 +214,12 @@ async function getAllAgentsMdFiles(
   }
 
   await walk(rootDir);
-  return { files: results.sort(), errors };
+  results.sort((a, b) => {
+    const depthA = a.split(sep).length;
+    const depthB = b.split(sep).length;
+    return depthA !== depthB ? depthA - depthB : a.localeCompare(b);
+  });
+  return { files: results, errors };
 }
 
 async function fileExists(path: string): Promise<boolean> {
