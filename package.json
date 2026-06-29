@@ -1,6 +1,6 @@
 {
   "name": "@dotagents-io/xagents",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Sync AGENTS.md files with configuration files across your project",
   "type": "module",
   "exports": {
