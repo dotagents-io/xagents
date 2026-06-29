@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import { dirname, join, relative, sep } from "path";
+import { discoverAgentsMdFiles } from "./discovery.js";
 
 export interface SyncResult {
   agentsFound: number;
@@ -24,10 +25,9 @@ export async function syncAgentsWithConfigFiles(
 
   try {
     const { files: allAgentsMdFiles, errors: scanErrors } =
-      await getAllAgentsMdFiles(rootDir);
+      await discoverAgentsMdFiles(rootDir);
     result.issues.push(...scanErrors);
 
-    // Split into .agents/ paths and other paths
     const agentsPathFiles: string[] = [];
     const otherAgentsMdFiles: string[] = [];
 
@@ -41,7 +41,6 @@ export async function syncAgentsWithConfigFiles(
 
     result.agentsFound = allAgentsMdFiles.length;
 
-    // Process regular AGENTS.md files first
     for (const agentsPath of otherAgentsMdFiles) {
       const dirPath = dirname(agentsPath);
       for (const configFilename of configFilenames) {
@@ -63,21 +62,13 @@ export async function syncAgentsWithConfigFiles(
       }
     }
 
-    // Process .agents/AGENTS.md files (last, so references stack in config files)
-    // Group by parent directory (the directory containing .agents/)
+    // Group .agents/AGENTS.md files by their parent directory
     const agentsByParent: Map<string, string[]> = new Map();
 
     for (const agentsPath of agentsPathFiles) {
       const relPath = relative(rootDir, agentsPath);
       const parts = relPath.split(sep);
-      let agentsIndex = -1;
-
-      for (let i = 0; i < parts.length; i++) {
-        if (parts[i] === ".agents") {
-          agentsIndex = i;
-          break;
-        }
-      }
+      const agentsIndex = parts.indexOf(".agents");
 
       if (agentsIndex === -1) continue;
 
@@ -90,7 +81,6 @@ export async function syncAgentsWithConfigFiles(
       agentsByParent.get(parentPath)!.push(referencePath);
     }
 
-    // Write config files with .agents/ references
     for (const [parentPath, references] of agentsByParent) {
       for (const configFilename of configFilenames) {
         const configPath = join(parentPath, configFilename);
@@ -148,15 +138,9 @@ async function ensureReference(
   return { created: false, updated: true };
 }
 
-async function hasReference(
-  filePath: string,
-  reference: string
-): Promise<boolean> {
+async function hasReference(filePath: string, reference: string): Promise<boolean> {
   const exists = await fileExists(filePath);
-  if (!exists) {
-    return false;
-  }
-
+  if (!exists) return false;
   const content = await fs.readFile(filePath, "utf-8");
   return content.toLowerCase().includes(reference.toLowerCase());
 }
@@ -177,59 +161,12 @@ async function appendReference(filePath: string, reference: string): Promise<voi
   }
 }
 
-async function getAllAgentsMdFiles(
-  rootDir: string
-): Promise<{ files: string[]; errors: string[] }> {
-  const results: string[] = [];
-  const errors: string[] = [];
-
-  async function walk(dir: string): Promise<void> {
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        // Skip common non-relevant directories
-        if (
-          entry.isDirectory() &&
-          [".git", "node_modules", ".next", "dist", "build"].includes(
-            entry.name
-          )
-        ) {
-          continue;
-        }
-
-        const fullPath = join(dir, entry.name);
-
-        if (entry.isDirectory()) {
-          await walk(fullPath);
-        } else if (entry.name === "AGENTS.md") {
-          results.push(fullPath);
-        }
-      }
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : String(err);
-      errors.push(`Failed to read directory ${dir}: ${msg}`);
-    }
-  }
-
-  await walk(rootDir);
-  results.sort((a, b) => {
-    const depthA = a.split(sep).length;
-    const depthB = b.split(sep).length;
-    return depthA !== depthB ? depthA - depthB : a.localeCompare(b);
-  });
-  return { files: results, errors };
-}
-
 async function fileExists(path: string): Promise<boolean> {
   try {
     await fs.access(path);
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
-    }
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw err;
   }
 }
@@ -237,16 +174,16 @@ async function fileExists(path: string): Promise<boolean> {
 async function isPathUnderRoot(filePath: string, rootDir: string): Promise<boolean> {
   try {
     const normalizedRoot = await fs.realpath(rootDir);
+    const prefix = normalizedRoot.endsWith(sep) ? normalizedRoot : normalizedRoot + sep;
 
     const exists = await fileExists(filePath);
     if (exists) {
       const realPath = await fs.realpath(filePath);
-      return realPath.startsWith(normalizedRoot + sep) || realPath === normalizedRoot;
+      return realPath.startsWith(prefix) || realPath === normalizedRoot;
     }
 
-    const dir = dirname(filePath);
-    const realDir = await fs.realpath(dir);
-    return realDir.startsWith(normalizedRoot + sep) || realDir === normalizedRoot;
+    const realDir = await fs.realpath(dirname(filePath));
+    return realDir.startsWith(prefix) || realDir === normalizedRoot;
   } catch {
     return false;
   }
