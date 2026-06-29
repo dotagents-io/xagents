@@ -121,6 +121,23 @@ This simple approach prevents duplicating references in various formatting conte
 
 For codebases where substring matching causes issues, use the `--nocheck` flag to skip the reference check entirely (always appends).
 
+### Symlinks
+
+xagents separates **discovery paths** (virtual) from **safety checks** (real), enabling shared `.agents/` folders via symlink while preventing writes to locations outside the root:
+
+**Discovery:** Uses naive path construction without resolving symlinks.
+- If `/project/.agents/AGENTS.md` is found (whether `.agents` is a symlink or not), the config file is derived as `/project/CLAUDE.md`
+- Symlinks in the discovery path determine the target location, not their real destinations
+
+**Safety:** Before any read or write operation, resolves real paths and validates they are within root.
+- If a file exists, its real path must be within root
+- If a file doesn't exist yet, its parent directory's real path must be within root
+- Rejects files/directories that resolve outside the root, preventing writes to shared or global locations
+
+**Use case:** Developers can safely symlink shared `.agents/` directories into projects. Syncing happens project-locally without touching the shared source.
+
+**Future:** A flag could allow writing to symlink targets (e.g., `--follow-symlinks`), but the default prioritizes preventing accidental writes to shared locations.
+
 ## CLI Interface
 
 ```

@@ -1,10 +1,8 @@
 import { promises as fs } from "fs";
-import { dirname, join, relative, resolve, sep } from "path";
+import { dirname, join, relative, sep } from "path";
 
 export interface SyncResult {
   agentsFound: number;
-  filesCreated: number;
-  filesUpdated: number;
   createdPaths: string[];
   updatedPaths: string[];
   failedPaths: Array<{ path: string; reason: string }>;
@@ -18,8 +16,6 @@ export async function syncAgentsWithConfigFiles(
 ): Promise<SyncResult> {
   const result: SyncResult = {
     agentsFound: 0,
-    filesCreated: 0,
-    filesUpdated: 0,
     createdPaths: [],
     updatedPaths: [],
     failedPaths: [],
@@ -36,8 +32,7 @@ export async function syncAgentsWithConfigFiles(
     const otherAgentsMdFiles: string[] = [];
 
     for (const file of allAgentsMdFiles) {
-      const normalized = resolve(file);
-      if (normalized.includes(sep + ".agents" + sep)) {
+      if (file.includes(sep + ".agents" + sep)) {
         agentsPathFiles.push(file);
       } else {
         otherAgentsMdFiles.push(file);
@@ -59,14 +54,8 @@ export async function syncAgentsWithConfigFiles(
             rootDir,
             nocheck
           );
-          if (created) {
-            result.filesCreated++;
-            result.createdPaths.push(relPath);
-          }
-          if (updated) {
-            result.filesUpdated++;
-            result.updatedPaths.push(relPath);
-          }
+          if (created) result.createdPaths.push(relPath);
+          if (updated) result.updatedPaths.push(relPath);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           result.failedPaths.push({ path: relPath, reason });
@@ -114,14 +103,8 @@ export async function syncAgentsWithConfigFiles(
               rootDir,
               nocheck
             );
-            if (created) {
-              result.filesCreated++;
-              result.createdPaths.push(relPath);
-            }
-            if (updated) {
-              result.filesUpdated++;
-              result.updatedPaths.push(relPath);
-            }
+            if (created) result.createdPaths.push(relPath);
+            if (updated) result.updatedPaths.push(relPath);
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
             result.failedPaths.push({ path: relPath, reason });
@@ -144,7 +127,7 @@ async function ensureReference(
   rootDir: string,
   nocheck: boolean = false
 ): Promise<{ created: boolean; updated: boolean }> {
-  if (!isPathUnderRoot(filePath, rootDir)) {
+  if (!(await isPathUnderRoot(filePath, rootDir))) {
     throw new Error(`Path traversal detected: ${filePath}`);
   }
 
@@ -157,11 +140,11 @@ async function ensureReference(
 
   const exists = await fileExists(filePath);
   if (!exists) {
-    await addReference(filePath, reference);
+    await fs.writeFile(filePath, `${reference}\n`, "utf-8");
     return { created: true, updated: false };
   }
 
-  await addReference(filePath, reference);
+  await appendReference(filePath, reference);
   return { created: false, updated: true };
 }
 
@@ -178,14 +161,20 @@ async function hasReference(
   return content.toLowerCase().includes(reference.toLowerCase());
 }
 
-async function addReference(filePath: string, reference: string): Promise<void> {
-  const exists = await fileExists(filePath);
-
-  if (!exists) {
-    await fs.writeFile(filePath, `${reference}\n`, "utf-8");
-  } else {
-    await fs.appendFile(filePath, `\n${reference}\n`, "utf-8");
+async function appendReference(filePath: string, reference: string): Promise<void> {
+  const fh = await fs.open(filePath, "r");
+  let prefix = "\n";
+  try {
+    const { size } = await fh.stat();
+    if (size > 0) {
+      const buf = Buffer.alloc(1);
+      await fh.read(buf, 0, 1, size - 1);
+      if (buf[0] === 0x0a) prefix = "";
+    }
+  } finally {
+    await fh.close();
   }
+  await fs.appendFile(filePath, `${prefix}${reference}\n`, "utf-8");
 }
 
 async function getAllAgentsMdFiles(
@@ -199,11 +188,6 @@ async function getAllAgentsMdFiles(
       const entries = await fs.readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
-        // Skip symlinks
-        if (entry.isSymbolicLink()) {
-          continue;
-        }
-
         // Skip common non-relevant directories
         if (
           entry.isDirectory() &&
@@ -237,13 +221,28 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     await fs.access(path);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw err;
   }
 }
 
-function isPathUnderRoot(filePath: string, rootDir: string): boolean {
-  const normalizedRoot = resolve(rootDir);
-  const normalizedPath = resolve(filePath);
-  return normalizedPath.startsWith(normalizedRoot + sep) || normalizedPath === normalizedRoot;
+async function isPathUnderRoot(filePath: string, rootDir: string): Promise<boolean> {
+  try {
+    const normalizedRoot = await fs.realpath(rootDir);
+
+    const exists = await fileExists(filePath);
+    if (exists) {
+      const realPath = await fs.realpath(filePath);
+      return realPath.startsWith(normalizedRoot + sep) || realPath === normalizedRoot;
+    }
+
+    const dir = dirname(filePath);
+    const realDir = await fs.realpath(dir);
+    return realDir.startsWith(normalizedRoot + sep) || realDir === normalizedRoot;
+  } catch {
+    return false;
+  }
 }
