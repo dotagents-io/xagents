@@ -50,15 +50,14 @@ async function main(): Promise<void> {
       console.log("No changes needed");
     }
 
-    if (result.warnings.length > 0) {
-      console.warn("\nWarnings:");
-      result.warnings.forEach((warn) => console.warn(`  - ${warn}`));
+    if (result.failedPaths.length > 0) {
+      console.log(`\nFailed to process ${result.failedPaths.length} config file(s):`);
+      result.failedPaths.forEach(({ path, reason }) => console.log(`  ${path}: ${reason}`));
     }
 
-    if (result.errors.length > 0) {
-      console.error("\nErrors:");
-      result.errors.forEach((err) => console.error(`  - ${err}`));
-      process.exit(1);
+    if (result.issues.length > 0) {
+      console.log("\nIssues encountered:");
+      result.issues.forEach((issue) => console.log(`  - ${issue}`));
     }
   } catch (err) {
     console.error(

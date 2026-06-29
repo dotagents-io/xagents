@@ -7,8 +7,8 @@ export interface SyncResult {
   filesUpdated: number;
   createdPaths: string[];
   updatedPaths: string[];
-  warnings: string[];
-  errors: string[];
+  failedPaths: Array<{ path: string; reason: string }>;
+  issues: string[];
 }
 
 export async function syncAgentsWithConfigFiles(
@@ -22,14 +22,14 @@ export async function syncAgentsWithConfigFiles(
     filesUpdated: 0,
     createdPaths: [],
     updatedPaths: [],
-    warnings: [],
-    errors: [],
+    failedPaths: [],
+    issues: [],
   };
 
   try {
     const { files: allAgentsMdFiles, errors: scanErrors } =
       await getAllAgentsMdFiles(rootDir);
-    result.warnings.push(...scanErrors);
+    result.issues.push(...scanErrors);
 
     // Split into .agents/ paths and other paths
     const agentsPathFiles: string[] = [];
@@ -37,10 +37,7 @@ export async function syncAgentsWithConfigFiles(
 
     for (const file of allAgentsMdFiles) {
       const normalized = resolve(file);
-      if (
-        normalized.includes(sep + ".agents" + sep) ||
-        normalized.endsWith(sep + ".agents" + sep + "AGENTS.md")
-      ) {
+      if (normalized.includes(sep + ".agents" + sep)) {
         agentsPathFiles.push(file);
       } else {
         otherAgentsMdFiles.push(file);
@@ -54,11 +51,12 @@ export async function syncAgentsWithConfigFiles(
       const dirPath = dirname(agentsPath);
       for (const configFilename of configFilenames) {
         const configPath = join(dirPath, configFilename);
+        const relPath = `./${relative(rootDir, configPath)}`;
         try {
-          const relPath = `./${relative(rootDir, configPath)}`;
           const { created, updated } = await ensureReference(
             configPath,
             "@AGENTS.md",
+            rootDir,
             nocheck
           );
           if (created) {
@@ -70,9 +68,8 @@ export async function syncAgentsWithConfigFiles(
             result.updatedPaths.push(relPath);
           }
         } catch (err) {
-          result.errors.push(
-            `Failed to process ${configPath}: ${err instanceof Error ? err.message : String(err)}`
-          );
+          const reason = err instanceof Error ? err.message : String(err);
+          result.failedPaths.push({ path: relPath, reason });
         }
       }
     }
@@ -108,12 +105,13 @@ export async function syncAgentsWithConfigFiles(
     for (const [parentPath, references] of agentsByParent) {
       for (const configFilename of configFilenames) {
         const configPath = join(parentPath, configFilename);
+        const relPath = `./${relative(rootDir, configPath)}`;
         for (const reference of references) {
           try {
-            const relPath = `./${relative(rootDir, configPath)}`;
             const { created, updated } = await ensureReference(
               configPath,
               `@${reference}`,
+              rootDir,
               nocheck
             );
             if (created) {
@@ -125,15 +123,14 @@ export async function syncAgentsWithConfigFiles(
               result.updatedPaths.push(relPath);
             }
           } catch (err) {
-            result.errors.push(
-              `Failed to process ${configPath}: ${err instanceof Error ? err.message : String(err)}`
-            );
+            const reason = err instanceof Error ? err.message : String(err);
+            result.failedPaths.push({ path: relPath, reason });
           }
         }
       }
     }
   } catch (err) {
-    result.errors.push(
+    result.issues.push(
       `Failed to scan directory: ${err instanceof Error ? err.message : String(err)}`
     );
   }
@@ -144,8 +141,13 @@ export async function syncAgentsWithConfigFiles(
 async function ensureReference(
   filePath: string,
   reference: string,
+  rootDir: string,
   nocheck: boolean = false
 ): Promise<{ created: boolean; updated: boolean }> {
+  if (!isPathUnderRoot(filePath, rootDir)) {
+    throw new Error(`Path traversal detected: ${filePath}`);
+  }
+
   if (!nocheck) {
     const hasRef = await hasReference(filePath, reference);
     if (hasRef) {
@@ -167,12 +169,13 @@ async function hasReference(
   filePath: string,
   reference: string
 ): Promise<boolean> {
-  try {
-    const content = await fs.readFile(filePath, "utf-8");
-    return content.toLowerCase().includes(reference.toLowerCase());
-  } catch {
+  const exists = await fileExists(filePath);
+  if (!exists) {
     return false;
   }
+
+  const content = await fs.readFile(filePath, "utf-8");
+  return content.toLowerCase().includes(reference.toLowerCase());
 }
 
 async function addReference(filePath: string, reference: string): Promise<void> {
@@ -196,6 +199,11 @@ async function getAllAgentsMdFiles(
       const entries = await fs.readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
+        // Skip symlinks
+        if (entry.isSymbolicLink()) {
+          continue;
+        }
+
         // Skip common non-relevant directories
         if (
           entry.isDirectory() &&
@@ -232,4 +240,10 @@ async function fileExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isPathUnderRoot(filePath: string, rootDir: string): boolean {
+  const normalizedRoot = resolve(rootDir);
+  const normalizedPath = resolve(filePath);
+  return normalizedPath.startsWith(normalizedRoot + sep) || normalizedPath === normalizedRoot;
 }

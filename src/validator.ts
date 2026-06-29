@@ -1,4 +1,9 @@
 export function validateFilenames(filenames: string[]): void {
+  if (filenames.length === 0) {
+    console.error(`Error: at least one filename required (default: CLAUDE.md)`);
+    process.exit(1);
+  }
+
   const validNameRegex = /^[a-zA-Z0-9._-]+$/;
 
   for (const filename of filenames) {
