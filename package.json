@@ -17,13 +17,29 @@
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",
     "dev": "tsc --watch",
-    "test": "node --test dist/**/*.test.js"
+    "test": "node --test dist/**/*.test.js",
+    "publish:patch": "npm run build && npm version patch && npm publish"
   },
   "keywords": [
     "dotagents",
     "agents",
+    "agents-md",
     "ai-coding-tools",
-    "configuration"
+    "mcp",
+    "claude",
+    "claude-code",
+    "cursor",
+    "codex",
+    "gemini",
+    "kiro",
+    "opencode",
+    "windsurf",
+    "codeium",
+    "devin",
+    "copilot",
+    "configuration",
+    "interoperability",
+    "context"
   ],
   "author": "dotagents community",
   "license": "MIT",
@@ -31,7 +47,7 @@
     "type": "git",
     "url": "https://github.com/dotagents-io/xagents.git"
   },
-  "homepage": "https://github.com/dotagents-io/xagents#readme",
+  "homepage": "https://dotagents.io",
   "bugs": {
     "url": "https://github.com/dotagents-io/xagents/issues"
   },
