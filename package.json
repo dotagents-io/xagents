@@ -1,0 +1,45 @@
+{
+  "name": "@dotagents-io/xagents",
+  "version": "1.0.0",
+  "description": "Sync AGENTS.md files with configuration files across your project",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "xagents": "./dist/index.js"
+  },
+  "files": [
+    "dist/index.js",
+    "dist/core.js",
+    "dist/validator.js"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "tsc --watch",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "keywords": [
+    "dotagents",
+    "agents",
+    "ai-coding-tools",
+    "configuration"
+  ],
+  "author": "dotagents community",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dotagents-io/xagents.git"
+  },
+  "homepage": "https://github.com/dotagents-io/xagents#readme",
+  "bugs": {
+    "url": "https://github.com/dotagents-io/xagents/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "typescript": "^5.3.3"
+  }
+}
